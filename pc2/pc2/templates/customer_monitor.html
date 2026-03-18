@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>스마트 마트 관제 시스템</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        /* CSS 변수 설정: 브랜드 컬러 및 공통 스타일 정의 */
+        :root { --primary: #2c3e50; --success: #27ae60; --accent: #e74c3c; --bg: #f4f7f6; --white: #ffffff; }
+        body { font-family: 'Malgun Gothic', sans-serif; background: var(--bg); margin: 0; padding: 20px; color: var(--primary); }
+        h1 { text-align: center; margin-bottom: 30px; }
+        
+        /* 레이아웃: 대시보드 구역 (좌측: 장바구니 리스트 / 우측: 실시간 영상) */
+        .dashboard { display: flex; gap: 25px; justify-content: center; align-items: flex-start; max-width: 1200px; margin: 0 auto; }
+        
+        /* 패널 스타일: 흰색 배경의 카드 형태 디자인 */
+        .panel { background: var(--white); padding: 25px; border-radius: 20px; width: 420px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); min-height: 400px; }
+        .user-info { border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; margin-bottom: 15px; }
+        .total-info { font-size: 1.3em; color: var(--accent); font-weight: bold; margin-top: 5px; }
+        
+        /* 영상 박스: 서버에서 보내주는 Base64 이미지를 띄우는 공간 */
+        .video-box { background: var(--primary); padding: 20px; border-radius: 20px; flex: 1; text-align: center; color: var(--white); }
+        .video-box img { width: 100%; max-width: 640px; border-radius: 12px; background: #000; display: block; margin: 0 auto; min-height: 360px; }
+        
+        /* 테이블 스타일: 장바구니 품목 나열 */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px 5px; border-bottom: 1px solid #f0f0f0; text-align: center; }
+        .btn-del { color: var(--accent); cursor: pointer; border: 1px solid var(--accent); padding: 2px 8px; border-radius: 4px; background: none; font-size: 0.8em; }
+        
+        /* 모달(팝업) 스타일: 상품 구매 확인 및 결제 승인창 */
+        #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 999; backdrop-filter: blur(3px); }
+        .modal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--white); padding: 35px; border-radius: 25px; z-index: 1000; text-align: center; width: 320px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+        .btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 25px; }
+        .btn-confirm { background: var(--success); color: white; padding: 12px 25px; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; flex: 1; }
+        .btn-cancel { background: #eee; color: #666; padding: 12px 25px; border: none; border-radius: 10px; cursor: pointer; flex: 1; }
+    </style>
+</head>
+<body>
+    <h1>🛒 스마트 마트 관제 시스템</h1>
+    <div class="dashboard">
+        <div class="panel">
+            <div class="user-info">
+                <h2 id="u-name">사용자 확인 중...</h2>
+                <div id="u-budget">보유 예산: 0원</div>
+                <div class="total-info" id="u-spent">합계: 0원</div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>상품명</th>
+                        <th>수량</th>
+                        <th>금액</th>
+                        <th>관리</th>
+                    </tr>
+                </thead>
+                <tbody id="cart-list"></tbody>
+            </table>
+        </div>
+        <div class="video-box">
+            <h3>🔍 실시간 상품 스캔 (Webcam YOLO)</h3>
+            <img id="webcam-feed" src="">
+        </div>
+    </div>
+
+    <div id="modal-overlay"></div>
+    <div id="purchase-modal" class="modal">
+        <div id="popup-prod-name" style="font-size:1.6em; color:var(--accent); font-weight:bold; margin-bottom:15px;">상품명</div>
+        <p>장바구니에 담으시겠습니까?</p>
+        <div class="btn-group">
+            <button class="btn-confirm" onclick="confirmPurchase()">담기</button>
+            <button class="btn-cancel" onclick="closeModals()">취소</button>
+        </div>
+    </div>
+
+    <div id="checkout-modal" class="modal">
+        <div style="font-size:1.6em; color:var(--success); font-weight:bold; margin-bottom:15px;">🏁 카운터 도착</div>
+        <p>결제를 진행하시겠습니까?<br>(장바구니가 초기화됩니다)</p>
+        <div class="btn-group">
+            <button class="btn-confirm" onclick="processCheckout()">결제 승인</button>
+            <button class="btn-cancel" onclick="closeModals()">취소</button>
+        </div>
+    </div>
+
+    <script>
+        // 서버와의 실시간 연결 초기화
+        const socket = io();
+        let currentClassId = null;  // 현재 인식된 상품의 ID 임시 저장용
+        
+        // [EVENT] 서버로부터 실시간 영상 프레임 수신
+        socket.on('webcam_frame', (data) => {
+            // Base64 문자열을 이미지 소스로 할당하여 영상처럼 보이게 함
+            document.getElementById('webcam-feed').src = 'data:image/jpeg;base64,' + data.image;
+        });
+        
+        // [EVENT] 서버가 상품 인식을 확정했을 때 구매 팝업 띄우기 요청 수신
+        socket.on('show_purchase_popup', (data) => {
+            currentClassId = data.class_id;
+            document.getElementById('popup-prod-name').innerText = data.prod_name;
+            document.getElementById('modal-overlay').style.display = 'block';
+            document.getElementById('purchase-modal').style.display = 'block';
+        });
+        
+        // [EVENT] 재고 부족 알림 또는 시스템 에러 메시지 수신
+        socket.on('error_message', (data) => {
+            // 로봇 보충 알림 로직 추가
+        if(data.msg.includes("보충")) {
+            console.log("🤖 로봇이 창고에서 물건을 가져오는 중입니다.");
+            // 로봇의 물리적 동작이 시작되었음을 UI 개발 로그에 기록
+            }
+            alert(data.msg); 
+        });
+
+        // [FUNCTION] 구매 팝업에서 '담기' 버튼 클릭 시
+        function confirmPurchase() {
+        // 서버에 해당 상품 ID 구매 확정 신호 전송 (백엔드의 handle_purchase 실행됨)
+            socket.emit('confirm_purchase', { class_id: currentClassId });
+            closeModals();
+        }
+
+        // [FUNCTION] 장바구니 테이블에서 '제거' 버튼 클릭 시
+        function deleteOne(productId) {
+            if(confirm("해당 상품을 1개 제거하시겠습니까?")) {
+                // 서버에 삭제 요청 전송 (백엔드의 handle_delete 실행됨)
+                socket.emit('delete_item', { product_id: productId });
+            }
+        }
+        
+        // [EVENT] 서버로부터 최신 장바구니 및 유저 데이터 응답 수신
+        socket.on('response_my_data', (data) => {
+            if(!data) return;
+            // 상단 유저 요약 정보 갱신
+            document.getElementById('u-name').innerText = data.name + "님";
+            document.getElementById('u-budget').innerText = "보유 예산: " + data.budget.toLocaleString() + "원";
+            document.getElementById('u-spent').innerText = "합계: " + data.total_spent.toLocaleString() + "원";
+            
+            // 테이블 내용 동적 생성
+            const listHtml = data.items.map(i => `
+                <tr>
+                    <td>${i.name}</td>
+                    <td>${i.qty}개</td>
+                    <td>${i.subtotal.toLocaleString()}원</td>
+                    <td><button class="btn-del" onclick="deleteOne(${i.id})">제거</button></td>
+                </tr>
+            `).join('');
+            document.getElementById('cart-list').innerHTML = listHtml || '<tr><td colspan="4">비어 있음</td></tr>';
+        });
+
+        function closeModals() {
+            document.getElementById('modal-overlay').style.display = 'none';
+            document.getElementById('purchase-modal').style.display = 'none';
+        }
+
+        // [EVENT] 로봇이 'counter arrival' 신호를 보냈을 때 결제 모달 띄우기 요청 수신
+        socket.on('show_checkout_popup', () => {
+            document.getElementById('modal-overlay').style.display = 'block';
+            document.getElementById('checkout-modal').style.display = 'block';
+        });
+
+        // [FUNCTION] 결제 승인 버튼 클릭 시
+        function processCheckout() {
+            socket.emit('complete_checkout');
+            closeModals();
+        }
+
+        // [FUNCTION] 모든 팝업창 닫기
+        function closeModals() {
+            document.getElementById('modal-overlay').style.display = 'none';
+            document.getElementById('purchase-modal').style.display = 'none';
+            document.getElementById('checkout-modal').style.display = 'none'; // 이 줄 추가
+        }
+        
+        // 1.5초마다 서버에 최신 유저 데이터 요청 (데이터 동기화 유지)
+        setInterval(() => socket.emit('request_my_data'), 1500);
+    </script>
+</body>
+</html>

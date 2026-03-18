@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>마트 실시간 관제 시스템</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        /* 기본 스타일 및 색상 변수 설정 */
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background-color: #f4f7f6; margin: 0; }
+        
+        /* 전체 레이아웃 중앙 정렬 */
+        .container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 25px; 
+            align-items: center; 
+            width: 100%;
+        }
+        
+        /* 각 모니터링 섹션(CCTV, 사용자, 재고) 카드 스타일 */
+        .section { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+            width: 95%; 
+            max-width: 1100px; 
+            box-sizing: border-box;
+        }
+
+        h2 { color: #2c3e50; border-left: 5px solid #2c3e50; padding-left: 10px; margin-bottom: 20px; text-align: left; }
+        
+        table { border-collapse: collapse; width: 100%; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #eee; }
+        th { background-color: #2c3e50; color: white; font-weight: bold; }
+
+        /* --- [승인 모달] 로봇 이동 요청 팝업창 스타일 --- */
+        #restock-modal {
+            display: none;      /* 기본적으로는 숨김 상태 */
+            position: fixed; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); 
+            z-index: 9999; /* 화면 최상단에 배치 */
+            justify-content: center; 
+            align-items: center;
+        }
+        .modal-content { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 15px; 
+            text-align: center; 
+            width: 450px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        .modal-btns { display: flex; gap: 15px; justify-content: center; margin-top: 20px; }
+        .btn { padding: 10px 25px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-yes { background-color: #27ae60; color: white; }
+        .btn-no { background-color: #95a5a6; color: white; }
+        #product-highlight { color: #e67e22; font-weight: bold; font-size: 1.2em; text-decoration: underline; }
+
+        /* --- [CCTV 영역] 로봇 시점 영상 스트리밍 박스 --- */
+        .video-box { 
+            background: #000; 
+            border-radius: 12px; 
+            overflow: hidden; 
+            position: relative; 
+            aspect-ratio: 16/9; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center;
+            margin: 0 auto; /* 가로 중앙 마진 */
+            width: 100%;
+            max-width: 800px; /* 영상이 너무 커지지 않도록 제한 */
+        }
+        #video_feed { width: 100%; height: 100%; object-fit: contain; }
+        .status-badge { position: absolute; top: 15px; left: 15px; background: rgba(0,255,0,0.7); color: black; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9em; }
+        
+        /* 예산 초과 시 강조 스타일 */
+        .warning { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        
+        <div class="section">
+            <h2>📹 실시간 CCTV 모니터링</h2>
+            <div class="video-box">
+                <div class="status-badge">LIVE</div>
+                <img id="video_feed" src="" alt="로봇 카메라 연결 대기 중...">
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>👤 사용자 쇼핑 현황</h2>
+            <table>
+                <thead><tr><th>사용자명</th><th>설정 예산</th><th>장바구니 목록</th><th>장바구니 합계</th></tr></thead>
+                <tbody id="user-body"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>📦 상품 재고 현황</h2>
+            <table>
+                <thead><tr><th>상품명</th><th>가격</th><th>매대 재고</th><th>창고 재고</th></tr></thead>
+                <tbody id="product-body"></tbody>
+            </table>
+        </div>
+
+        <div id="restock-modal">
+            <div class="modal-content">
+                <h3 style="color: #2c3e50;">🤖 로봇 이동 승인</h3>
+                <p id="modal-msg">상품 이동을 승인하시겠습니까?</p>
+                <div class="modal-btns">
+                    <button class="btn btn-yes" onclick="sendResponse('yes')">네</button>
+                    <button class="btn btn-no" onclick="sendResponse('no')">아니요</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentTargetProduct = "";
+
+        // [이벤트] 로봇 카메라 프레임 수신
+        const videoFeed = document.getElementById('video_feed');
+        socket.on('video_frame', function(data) {
+            if (data && data.image) {
+                // Base64 데이터를 이미지 태그의 src에 주입하여 영상처럼 출력
+                videoFeed.src = 'data:image/jpeg;base64,' + data.image;
+            }
+        });
+
+        // [이벤트] 재고 부족 알림 수신 (모달 팝업 가동)
+        socket.on('show_restock_popup', function(data) {
+            console.log("서버 수신 데이터:", data);
+            currentTargetProduct = (data && data.product) ? data.product : "Unknown"; 
+            
+            const msgElement = document.getElementById('modal-msg');
+
+            // 상황에 따른 메시지 분기 (계산대 고객 도착 vs 일반 상품 보충)
+            if (currentTargetProduct === 'Customer Area' || currentTargetProduct === 'General') {
+                msgElement.innerHTML = "계산대에 고객이 감지되었습니다.<br>이동할까요?";
+            } else {
+                msgElement.innerHTML = `<span id="product-highlight">${currentTargetProduct}</span> 보충 요청입니다.<br>로봇을 보낼까요?`;
+            }
+            
+            // 모달 표시
+            document.getElementById('restock-modal').style.display = 'flex';
+        });
+
+        // 관리자 승인 응답 전송
+        function sendResponse(answer) {
+            const responseData = {
+                response: answer,
+                product: currentTargetProduct 
+            };
+            socket.emit('confirm_restock', responseData);
+            document.getElementById('restock-modal').style.display = 'none';
+        }
+
+        // [이벤트] 대시보드 수치 업데이트 (1초마다 자동 갱신)
+        socket.on('update_dashboard', function(data) {
+            const userBody = document.getElementById('user-body');
+            userBody.innerHTML = data.users.map(u => `
+                <tr>
+                    <td>${u.name}</td>
+                    <td>${u.budget.toLocaleString()}원</td>
+                    <td>${u.items}</td>
+                    <td class="${u.cart_sum > u.budget ? 'warning' : ''}">${u.cart_sum.toLocaleString()}원</td>
+                </tr>`).join('');
+
+            // 상품 재고 테이블 업데이트
+            const productBody = document.getElementById('product-body');
+            productBody.innerHTML = data.products.map(p => `
+                <tr>
+                    <td>${p.name}</td>
+                    <td>${p.price.toLocaleString()}원</td>
+                    <td style="${p.shelf < 3 ? 'color:red;font-weight:bold;' : ''}">${p.shelf}개</td>
+                    <td>${p.warehouse}개</td>
+                </tr>`).join('');
+        });
+    </script>
+</body>
+</html>

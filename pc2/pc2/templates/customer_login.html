@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>마트 로그인</title>
+    <style>
+        /* 기본 배경 및 레이아웃 설정: 화면 중앙 정렬 */
+        body { font-family: sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        
+        /* 로그인 박스 디자인: 흰색 배경에 둥근 모서리와 그림자 효과 */
+        .login-box { background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 320px; text-align: center; }
+        
+        /* 입력창 스타일: 너비 100%와 여백 설정 */
+        input { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
+        
+        /* 로그인 버튼 스타일: 녹색 배경과 흰색 글씨 */
+        button { width: 100%; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        
+        /* 에러 메시지 스타일: 빨간색 글씨로 하단 여백 추가 */
+        .error { color: #e74c3c; font-size: 0.9em; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>🛒 Mart Login</h2>
+        {% with messages = get_flashed_messages() %}{% if messages %}{% for message in messages %}
+              <div class="error">{{ message }}</div>
+        {% endfor %}{% endif %}{% endwith %}
+        <form method="POST">
+            <input type="text" name="username" placeholder="아이디" required>
+            <input type="password" name="password" placeholder="비밀번호" required>
+            <button type="submit">로그인</button>
+        </form>
+    </div>
+</body>
+</html>
