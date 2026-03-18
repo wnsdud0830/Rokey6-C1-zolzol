@@ -26,48 +26,40 @@ C-1_지능1_소스코드/
 
 ### 3.1 노드/토픽 개요
 
-```mermaid
 flowchart LR
-  subgraph PC1[pc1: 고객 구역 감지]
-    P1[person_detection.py
-YOLO person] --> T1[/person_detect (String)/]
+  subgraph PC1["pc1: 고객 구역 감지"]
+    P1["person_detection.py<br/>YOLO person"] --> T1["person_detect<br/>(std_msgs/String)"]
   end
 
-  subgraph PC2[pc2: 고객 결제/재고 웹]
-    CM[customer_monitor.py
-Flask+SocketIO + YOLO 상품탐지] 
-    AM[admin_monitor_topic.py
-Flask+SocketIO + ROS 브릿지]
+  subgraph PC2["pc2: 고객 결제/재고 웹"]
+    CM["customer_monitor.py<br/>Flask+SocketIO + YOLO 상품탐지"]
+    AM["admin_monitor_topic.py<br/>Flask+SocketIO + ROS 브릿지"]
 
     T1 -->|구독| CM
 
-    CM --> BW[/budget_warning (String)/]
-    CM --> OOS[/out_of_stock (String)/]
-    CM --> FIN[/finish_shopping (String)/]
+    CM --> BW["budget_warning<br/>(std_msgs/String)"]
+    CM --> OOS["out_of_stock<br/>(std_msgs/String)"]
+    CM --> FIN["finish_shopping<br/>(std_msgs/String)"]
 
     OOS -->|구독| AM
-    AM --> RMT[/robot_move_topic (String)/]
-    VID[/webcam_video (sensor_msgs/Image)/] -->|구독| AM
+    AM --> RMT["robot_move_topic<br/>(std_msgs/String)"]
+    VID["webcam_video<br/>(sensor_msgs/Image)"] -->|구독| AM
   end
 
-  subgraph PC3[pc3: 경고음/AMR1]
-    BEEP[beep_node.py
-경고음] 
+  subgraph PC3["pc3: 경고음/AMR1"]
+    BEEP["beep_node.py<br/>경고음"]
     BW -->|구독| BEEP
 
-    AMR1[amr1.py
-(옵션) 고객 추적/귀환] 
+    AMR1["amr1.py<br/>(옵션) 고객 추적/귀환"]
     T1 -->|구독| AMR1
     FIN -->|구독| AMR1
   end
 
-  subgraph PC4[pc4: AMR2 재고보충 주행]
-    AMR2[AMR2_control.py
-TurtleBot4Navigator] 
+  subgraph PC4["pc4: AMR2 재고보충 주행"]
+    AMR2["AMR2_control.py<br/>TurtleBot4Navigator"]
     OOS -->|구독| AMR2
     RMT -->|구독| AMR2
   end
-```
 
 > 토픽 이름은 코드에 선언된 값을 기준으로 작성했다. (예: `person_detect`, `budget_warning`, `out_of_stock`, `finish_shopping`, `robot_move_topic`) 
 
