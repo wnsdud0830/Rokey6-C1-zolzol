@@ -26,6 +26,7 @@ C-1_지능1_소스코드/
 
 ### 3.1 노드/토픽 개요
 
+```mermaid
 flowchart LR
   subgraph PC1["pc1: 고객 구역 감지"]
     P1["person_detection.py<br/>YOLO person"] --> T1["person_detect<br/>(std_msgs/String)"]
@@ -60,6 +61,7 @@ flowchart LR
     OOS -->|구독| AMR2
     RMT -->|구독| AMR2
   end
+```
 
 > 토픽 이름은 코드에 선언된 값을 기준으로 작성했다. (예: `person_detect`, `budget_warning`, `out_of_stock`, `finish_shopping`, `robot_move_topic`) 
 
